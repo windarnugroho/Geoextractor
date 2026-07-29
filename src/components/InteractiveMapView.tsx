@@ -98,8 +98,8 @@ export const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
         className: 'custom-map-marker',
         html: `
           <div style="
-            background: ${isSelected ? '#38bdf8' : badgeColor};
-            color: #020617;
+            background: ${isSelected ? '#6366f1' : badgeColor};
+            color: #ffffff;
             font-weight: 800;
             font-size: 10px;
             padding: 3px 7px;
@@ -109,7 +109,7 @@ export const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
             white-space: nowrap;
             transform: translate(-50%, -100%);
             display: flex;
-            items-center;
+            align-items: center;
             gap: 2px;
           ">
             <span>T-${p.pointNumber}</span>
@@ -124,7 +124,7 @@ export const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
       // Popup Content
       const popupHtml = `
         <div style="font-family: sans-serif; padding: 4px; color: #0f172a;">
-          <div style="font-weight: 800; font-size: 13px; color: #059669; margin-bottom: 2px;">
+          <div style="font-weight: 800; font-size: 13px; color: #4f46e5; margin-bottom: 2px;">
             Titik Koordinat #${p.pointNumber}
           </div>
           <div style="font-size: 11px; color: #475569; margin-bottom: 6px;">
@@ -166,14 +166,17 @@ export const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
     if (bounds.isValid()) {
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
     }
+  }, [points, tileLayerType]);
 
+  // Clean up map instance only when component unmounts
+  useEffect(() => {
     return () => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
     };
-  }, [points, tileLayerType, selectedPointId]);
+  }, []);
 
   // Open popup when selectedPointId changes
   useEffect(() => {

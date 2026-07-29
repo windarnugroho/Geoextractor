@@ -21,11 +21,11 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 } // 20MB max
 });
 
-// Initialize Gemini Client
+// Helper function to check if Gemini API key is valid
 const getGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY environment variable is missing.');
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
+    throw new Error('GEMINI_API_KEY_MISSING');
   }
   return new GoogleGenAI({
     apiKey,
@@ -37,12 +37,141 @@ const getGeminiClient = () => {
   });
 };
 
+// Local fallback text coordinate parser
+function parseCoordinatesLocalFallback(text: string) {
+  const points: any[] = [];
+  
+  // 1. Match DMS coordinates e.g. 3°54'34"S 115°5'60"E
+  const dmsRegex = /(?:titik|point|pt|no\.?)?\s*(\w+)?[:\s]*(\d+)[°\s]+(\d+)[`''\s]+([\d.]+)[`''"”\s]*([NSLSlu]+)[,\s]+(\d+)[°\s]+(\d+)[`''\s]+([\d.]+)[`''"”\s]*([EWBTbt]+)/gi;
+  let match;
+  let count = 1;
+
+  while ((match = dmsRegex.exec(text)) !== null) {
+    const ptNum = match[1] || `${count}`;
+    const latDeg = parseInt(match[2], 10);
+    const latMin = parseInt(match[3], 10);
+    const latSec = parseFloat(match[4]);
+    const latDirRaw = match[5].toUpperCase();
+    const latDir = (latDirRaw.includes('S') || latDirRaw.includes('LS')) ? 'S' : 'N';
+
+    const lonDeg = parseInt(match[6], 10);
+    const lonMin = parseInt(match[7], 10);
+    const lonSec = parseFloat(match[8]);
+    const lonDirRaw = match[9].toUpperCase();
+    const lonDir = (lonDirRaw.includes('W')) ? 'W' : 'E';
+
+    let latDD = latDeg + latMin / 60 + latSec / 3600;
+    if (latDir === 'S') latDD = -latDD;
+
+    let lonDD = lonDeg + lonMin / 60 + lonSec / 3600;
+    if (lonDir === 'W') lonDD = -lonDD;
+
+    points.push({
+      pointNumber: ptNum,
+      dmsLongitude: { degrees: lonDeg, minutes: lonMin, seconds: lonSec, direction: lonDir },
+      dmsLatitude: { degrees: latDeg, minutes: latMin, seconds: latSec, direction: latDir },
+      latitude: Number(latDD.toFixed(6)),
+      longitude: Number(lonDD.toFixed(6)),
+      notes: 'Ekstraksi Parser Teks'
+    });
+    count++;
+  }
+
+  // 2. Match Decimal Lat, Long e.g. -3.178661, 115.986472
+  if (points.length === 0) {
+    const decimalRegex = /(-?\d+\.\d{4,})\s*,\s*(-?\d+\.\d{4,})/g;
+    let decMatch;
+    count = 1;
+    while ((decMatch = decimalRegex.exec(text)) !== null) {
+      let val1 = parseFloat(decMatch[1]);
+      let val2 = parseFloat(decMatch[2]);
+      let lat = val1;
+      let lon = val2;
+
+      // In Indonesia, lon is ~95 to ~141 E, lat is ~-11 to ~6
+      if (val1 > 90 && val2 < 20) {
+        lon = val1;
+        lat = val2;
+      }
+
+      const isLat = lat >= 0 ? 'N' : 'S';
+      const absLat = Math.abs(lat);
+      const latD = Math.floor(absLat);
+      const latMF = (absLat - latD) * 60;
+      const latM = Math.floor(latMF);
+      const latS = Number(((latMF - latM) * 60).toFixed(2));
+
+      const isLon = lon >= 0 ? 'E' : 'W';
+      const absLon = Math.abs(lon);
+      const lonD = Math.floor(absLon);
+      const lonMF = (absLon - lonD) * 60;
+      const lonM = Math.floor(lonMF);
+      const lonS = Number(((lonMF - lonM) * 60).toFixed(2));
+
+      points.push({
+        pointNumber: `${count}`,
+        dmsLongitude: { degrees: lonD, minutes: lonM, seconds: lonS, direction: isLon },
+        dmsLatitude: { degrees: latD, minutes: latM, seconds: latS, direction: isLat },
+        latitude: Number(lat.toFixed(6)),
+        longitude: Number(lon.toFixed(6)),
+        notes: 'Ekstraksi Desimal'
+      });
+      count++;
+    }
+  }
+
+  return {
+    title: 'Ekstraksi Teks Chat',
+    points
+  };
+}
+
 // API Endpoint for Coordinate Extraction
 app.post('/api/extract-coordinates', upload.single('file'), async (req: Request, res: Response) => {
-  try {
-    const ai = getGeminiClient();
-    const { sourceType, rawText, imageBase64, mimeType } = req.body;
+  const { sourceType, rawText, imageBase64, mimeType } = req.body;
 
+  let ai: GoogleGenAI | null = null;
+  let isApiKeyMissing = false;
+
+  try {
+    ai = getGeminiClient();
+  } catch (err: any) {
+    if (err.message === 'GEMINI_API_KEY_MISSING') {
+      isApiKeyMissing = true;
+    }
+  }
+
+  // Extract text from uploaded file if it's a text/csv/txt file
+  let textToParse = rawText || '';
+  if (req.file && (req.file.mimetype.startsWith('text/') || req.file.originalname.match(/\.(txt|csv|tsv|log)$/i))) {
+    textToParse = req.file.buffer.toString('utf-8');
+  }
+
+  // If Gemini API key is missing, attempt local fallback text parser first
+  if (isApiKeyMissing && textToParse) {
+    const fallbackData = parseCoordinatesLocalFallback(textToParse);
+    if (fallbackData.points.length > 0) {
+      if (req.file) {
+        fallbackData.title = req.file.originalname;
+      }
+      res.json({
+        success: true,
+        data: fallbackData,
+        warning: 'Kunci API Gemini belum diatur. Menggunakan parser teks standar.'
+      });
+      return;
+    }
+  }
+
+  if (isApiKeyMissing) {
+    res.json({
+      success: false,
+      error: 'GEMINI_API_KEY belum dikonfigurasi. Silakan atur GEMINI_API_KEY di menu Settings (⚙️) -> Secrets pada AI Studio untuk memproses OCR gambar/foto.'
+    });
+    return;
+  }
+
+  try {
     let contents: any[] = [];
 
     const promptText = `
@@ -101,7 +230,7 @@ Harap kembalikan JSON persis sesuai dengan schema berikut.
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents,
       config: {
         responseMimeType: 'application/json',
