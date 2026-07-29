@@ -1,0 +1,6 @@
+{
+  "name": "Ekstraktor & Integrator Koordinat Geo",
+  "description": "Ekstraksi data koordinat dari foto watermark, tabel scan/dokumen photocopy, dan teks chat menggunakan AI Gemini, terintegrasi ke peta digital dan spreadsheet.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
