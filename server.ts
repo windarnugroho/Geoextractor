@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import multer from 'multer';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -190,10 +191,24 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    // Resolve dist folder dynamically from __dirname or process.cwd()
+    let distPath = path.join(process.cwd(), 'dist');
+    if (fs.existsSync(path.join(__dirname, 'index.html'))) {
+      distPath = __dirname;
+    } else if (!fs.existsSync(distPath) && fs.existsSync(path.join(__dirname, '../dist'))) {
+      distPath = path.join(__dirname, '../dist');
+    }
+
+    console.log(`[Production] Serving static assets from: ${distPath}`);
+
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send('Application build error: index.html not found.');
+      }
     });
   }
 

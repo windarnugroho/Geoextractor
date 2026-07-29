@@ -27,6 +27,12 @@ export const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
+    // Check if map container is already initialized by leaflet
+    const container = mapContainerRef.current as any;
+    if (container._leaflet_id && !mapInstanceRef.current) {
+      container._leaflet_id = null;
+    }
+
     // Create Map Instance if not created
     if (!mapInstanceRef.current) {
       const map = L.map(mapContainerRef.current, {
@@ -160,6 +166,13 @@ export const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
     if (bounds.isValid()) {
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
     }
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
   }, [points, tileLayerType, selectedPointId]);
 
   // Open popup when selectedPointId changes
